@@ -16,7 +16,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Aap apna version bhi daal sakte ho
+          python-version: '3.11'
 
       - name: Install Dependencies
         run: |
@@ -27,17 +27,16 @@ jobs:
       - name: Build EXE using your batch file
         run: |
           # 1. Forcefully delete any existing spec or build files (Clean Slate)
-          del /f /q *.spec || rem
+          if exist *.spec del /f /q *.spec
           if exist build rmdir /s /q build
-          if exist dist rmdir /s /q dist'
+          if exist dist rmdir /s /q dist
 
           # 2. Run the build script
-          ./build_exe.bat
-        shell: cm
+          call ./build_exe.bat
+        shell: cmd
 
       - name: Upload EXE for Download
         uses: actions/upload-artifact@v4
         with:
           name: Rox-Invoice-App-Windows
-          # PyInstaller by default 'dist' folder mein exe daalta hai
           path: dist/
