@@ -26,6 +26,7 @@ jobs:
 
       - name: Build EXE using your batch file
         run: |
+          echo {} > config.json
           ./build_exe.bat
         shell: cmd
 
