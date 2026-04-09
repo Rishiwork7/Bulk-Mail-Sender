@@ -89,6 +89,7 @@ class RoxInvoiceAppBM2:
         self.var_auth_method = tk.StringVar(value="Manual")
         self.var_out_type = tk.StringVar(value="Raw pdf")
         self.var_info = tk.StringVar(value="Hover over an option to view its description")
+        self.custom_pdf_path = None
 
     def show_login(self):
         self.login_frame = tk.Frame(self.root, bg="#111111")
@@ -442,6 +443,12 @@ class RoxInvoiceAppBM2:
         self.cb_pformat.set("A4")
         self.cb_pformat.pack(side="right", padx=5)
         
+        pdf_f = tk.Frame(content_right, bg="#E0E0E0")
+        pdf_f.pack(fill="x", pady=2)
+        tk.Button(pdf_f, text="Upload Custom PDF", bg="#2196F3", fg="white", font=("Arial", 9, "bold"), command=self.browse_custom_pdf).pack(side="left", padx=5)
+        self.lbl_custom_pdf = tk.Label(pdf_f, text="No file selected", bg="#E0E0E0", font=("Arial", 9))
+        self.lbl_custom_pdf.pack(side="left", padx=5)
+        
         msg_frame2 = tk.Frame(content_right, bg="white", height=100, bd=1, relief="sunken")
         msg_frame2.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -489,6 +496,7 @@ class RoxInvoiceAppBM2:
             'sender_data': [],
             'failed_emails': [],
             'logs': "Initialization...\n",
+            'custom_pdf_path': None,
             'vals': {
                 'var_rotate': False, 'var_grayscale': False, 'var_crop': False, 'var_hq': False,
                 'var_hsize': False, 'var_limit_check': False, 'var_auto_body_style': False,
@@ -512,6 +520,7 @@ class RoxInvoiceAppBM2:
             'target_data': self.target_data,
             'sender_data': self.sender_data,
             'failed_emails': list(self.failed_emails),
+            'custom_pdf_path': self.custom_pdf_path,
             'logs': self.txt_logs.get("1.0", tk.END),
             'vals': {
                 'var_rotate': self.var_rotate.get(), 'var_grayscale': self.var_grayscale.get(),
@@ -544,6 +553,9 @@ class RoxInvoiceAppBM2:
         self.target_data = state['target_data']
         self.sender_data = state['sender_data']
         self.failed_emails = state['failed_emails']
+        self.custom_pdf_path = state.get('custom_pdf_path', None)
+        if hasattr(self, 'lbl_custom_pdf'):
+            self.lbl_custom_pdf.config(text=os.path.basename(self.custom_pdf_path) if self.custom_pdf_path else "No file selected")
         
         self.txt_logs.delete("1.0", tk.END)
         self.txt_logs.insert("1.0", state['logs'])
@@ -802,6 +814,13 @@ class RoxInvoiceAppBM2:
             self.root.after(0, lambda: messagebox.showerror("OAuth Error", f"Failed to authorize: {str(e)}"))
             self.root.after(0, lambda: self.log_message(f"OAuth Error: {e}"))
 
+    def browse_custom_pdf(self):
+        path = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
+        if path:
+            self.custom_pdf_path = path
+            if hasattr(self, 'lbl_custom_pdf'):
+                self.lbl_custom_pdf.config(text=os.path.basename(path))
+
     def import_subjects(self):
         # Open file dialog for txt or csv containing subjects
         path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt"), ("CSV Files", "*.csv")])
@@ -998,7 +1017,8 @@ class RoxInvoiceAppBM2:
             'width': int(self.spn_w.get()),
             'height': int(self.spn_h.get()),
             'random_width': self.var_random_width.get(),
-            'page_format': self.cb_pformat.get()
+            'page_format': self.cb_pformat.get(),
+            'custom_pdf_path': self.custom_pdf_path
         }
 
     def run_google_auth_flow_and_send(self, client_secrets_path, ui_config, t_idx):

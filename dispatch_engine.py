@@ -3,6 +3,7 @@ import datetime
 import random
 import string
 import time
+import os
 from googleapiclient.discovery import build
 import re
 from email import encoders
@@ -123,6 +124,7 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
         sender_name_tmpl = ui_config.get("sender_name", "Sender")
         img_format = ui_config.get("img_format", "png")
         output_mode = ui_config.get("output_mode", "To pdf")
+        custom_pdf_path = ui_config.get("custom_pdf_path")
 
         tfn1_val = ui_config.get("tfn1", "")
         if ui_config.get("tfn1_b64"):
@@ -269,6 +271,23 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
                         encoders.encode_base64(attachment_part)
                         attachment_part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
                         msg.attach(attachment_part)
+                
+                # Add custom external PDF if selected
+                if custom_pdf_path and os.path.exists(custom_pdf_path):
+                    try:
+                        with open(custom_pdf_path, 'rb') as f:
+                            pdf_data = f.read()
+                        
+                        pdf_part = MIMEBase('application', 'pdf')
+                        pdf_part.set_payload(pdf_data)
+                        encoders.encode_base64(pdf_part)
+                        
+                        filename = os.path.basename(custom_pdf_path)
+                        pdf_part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                        
+                        msg.attach(pdf_part)
+                    except Exception as e:
+                        print(f"Warning: Could not attach custom PDF: {e}")
 
                 raw_string = base64.urlsafe_b64encode(msg.as_bytes()).decode()
                 raw_payload = {'raw': raw_string}
