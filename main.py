@@ -417,7 +417,7 @@ class RoxInvoiceAppBM2:
         content_left.pack(side="left", fill="y", padx=5)
         tk.Label(content_left, text="Content (html)", font=("Arial", 11, "bold"), bg="#E0E0E0").pack(anchor="w")
         self.var_out_type = tk.StringVar(value="Raw pdf")
-        opts = ["To pdf", "To image", "Inline image", "Raw pdf", "Inline Html", "Docx", "PPTX"]
+        opts = ["Flat pdf", "To image", "Inline image", "Raw pdf", "Inline Html", "Docx", "PPTX"]
         for o in opts:
             tk.Radiobutton(content_left, text=o, variable=self.var_out_type, value=o, font=("Arial", 10, "bold") if o=="Raw pdf" else ("Arial", 10), bg="#E0E0E0").pack(anchor="w")
 
@@ -892,6 +892,14 @@ class RoxInvoiceAppBM2:
     def preview_html_conversion(self):
         try:
             html = self.txt_content.get("1.0", "end-1c")
+            # Replace placeholder tags for the preview
+            sample_inv = f"INV-{random.randint(1000000, 9999999)}"
+            sample_txn = "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
+            sample_date = time.strftime("%B %d, %Y")
+            html = html.replace("#INVOICE#", sample_inv).replace("[Invoice_Number]", sample_inv)
+            html = html.replace("#RANDOM#", sample_txn).replace("[Transaction_ID]", sample_txn)
+            html = html.replace("#DATE#", sample_date).replace("[Issue_Date]", sample_date)
+            
             output_mode = self.var_out_type.get()
             
             # Prepare config for service
@@ -903,7 +911,8 @@ class RoxInvoiceAppBM2:
                 'crop': self.var_crop.get(),
                 'hq': self.var_hq.get(),
                 'hsize': self.var_hsize.get(),
-                'page_format': self.cb_pformat.get()
+                'page_format': self.cb_pformat.get(),
+                'inv_no': sample_inv
             }
             
             data, filename, _ = generate_attachment_buffer(html, output_mode, self.cb_iformat.get(), config)

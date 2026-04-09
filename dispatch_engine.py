@@ -1,9 +1,9 @@
 import base64
 import datetime
 import random
-import smtplib
 import string
 import time
+from googleapiclient.discovery import build
 import re
 from email import encoders
 from email.mime.base import MIMEBase
@@ -62,13 +62,19 @@ def _build_replacements(row, current_date_str):
     name = str(row.get("Name", row.get("First_Name", "Customer")))
     txn_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
     inv_len = random.choice([7, 8, 10])
-    inv_no = "".join(random.choices(string.ascii_uppercase + string.digits, k=inv_len))
+    inv_no = "INV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=inv_len))
     return dest_email, name, inv_no, {
         "[First_Name]": name,
         "[Email]": dest_email,
         "[Invoice_Number]": inv_no,
         "[Transaction_ID]": txn_id,
         "[Issue_Date]": current_date_str,
+        "#INVOICE#": inv_no,
+        "#RANDOM#": txn_id,
+        "#DATE#": current_date_str,
+        "#EMAIL#": dest_email,
+        "#NAME#": name,
+        "#FIRST_NAME#": name,
     }
 
 
@@ -107,7 +113,6 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
     ui_config: dict of all checkbox/entry values.
     log_callback: function(msg) to log to UI.
     """
-    server = None
 
     try:
         log_callback("Engine Dispatch Started!")
@@ -199,41 +204,26 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
                     client_secret = sender_acc.get("client_secret", "")
                     token_uri = sender_acc.get("token_uri", "https://oauth2.googleapis.com/token")
 
-                if acc_user != curr_user:
-                    if server:
-                        server.quit()
-                    log_callback(f"Connecting to SMTP as {acc_user}...")
-                    try:
-                        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-                        server.ehlo() # Ensure EHLO is sent before AUTH
-                        if (auth_choice == "JSON" or auth_choice == "GoogleOAuth") and (acc_token or refresh_token):
-                            # Handle refresh if needed
-                            if refresh_token and client_id and client_secret:
-                                creds = Credentials(
-                                    token=acc_token,
-                                    refresh_token=refresh_token,
-                                    token_uri=token_uri,
-                                    client_id=client_id,
-                                    client_secret=client_secret
-                                )
-                                if not creds.valid:
-                                    log_callback(f"Refreshing token for {acc_user}...")
-                                    creds.refresh(google.auth.transport.requests.Request())
-                                    acc_token = creds.token
-                            
-                            auth_string = 'user=%s\1auth=Bearer %s\1\1' % (acc_user, acc_token)
-                            code, resp = server.docmd('AUTH', 'XOAUTH2 ' + base64.b64encode(auth_string.encode()).decode())
-                            if code != 235:
-                                raise Exception(f"OAuth2 Authentication failed: {code} {resp}")
-                        else:
-                            server.login(acc_user.strip(), acc_pass.strip())
+                try:
+                    if (auth_choice == "JSON" or auth_choice == "GoogleOAuth") and (acc_token or refresh_token):
+                        creds = Credentials(
+                            token=acc_token,
+                            refresh_token=refresh_token,
+                            token_uri=token_uri,
+                            client_id=client_id,
+                            client_secret=client_secret
+                        )
+                    else:
+                        raise Exception("Gmail API strictly requires OAuth2 credentials. Support for manual login is gone.")
+                    
+                    if acc_user != curr_user:
                         curr_user = acc_user
-                    except Exception as smtp_err:
-                        log_callback(f"Auth FAILED for {acc_user}: {smtp_err}")
-                        if ui_config.get("limit_check"):
-                            curr_user = None
-                            continue
-                        raise smtp_err
+                except Exception as auth_err:
+                    log_callback(f"Auth FAILED for {acc_user}: {auth_err}")
+                    if ui_config.get("limit_check"):
+                        curr_user = None
+                        continue
+                    raise auth_err
 
                 multipart_type = "related" if output_mode == "Inline image" else "mixed"
                 msg = MIMEMultipart(multipart_type)
@@ -280,7 +270,11 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
                         attachment_part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
                         msg.attach(attachment_part)
 
-                server.send_message(msg)
+                raw_string = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+                raw_payload = {'raw': raw_string}
+
+                service = build('gmail', 'v1', credentials=creds)
+                service.users().messages().send(userId='me', body=raw_payload).execute()
                 sent_count += 1
                 total_sent_this_session += 1
                 log_callback(f"SUCCESS: Sent to {dest_email} via {acc_user}")
@@ -301,5 +295,4 @@ def start_bulk_dispatch(target_df, sender_list, ui_config, log_callback):
     except Exception as e:
         log_callback(f"ENGINE CRASH: {e}")
     finally:
-        if server:
-            server.quit()
+        pass

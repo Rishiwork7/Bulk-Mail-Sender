@@ -6,6 +6,7 @@ import string
 import tempfile
 import subprocess
 import sys
+import re
 from pathlib import Path
 
 from html2image import Html2Image
@@ -236,12 +237,32 @@ def _render_html_to_image_bytes(final_attachment_html, img_format, config_dict):
     return _image_to_bytes(processed_image, img_format, config_dict)
 
 
-def _image_bytes_to_pdf_bytes(image_bytes):
-    with Image.open(io.BytesIO(image_bytes)) as image:
-        pdf_ready_image = image.convert("RGB") if image.mode != "RGB" else image.copy()
+def compress_to_flat_pdf(pillow_img, max_kb=100):
+    max_bytes = max_kb * 1024
+    scale = 0.9
+    min_dimension = 300 # Barely readable threshold
+    current_quality = 95
+    
+    current_img = pillow_img.copy()
+    
+    while True:
         buffer = io.BytesIO()
-        pdf_ready_image.save(buffer, format="PDF")
-        return buffer.getvalue()
+        current_img.save(buffer, format="PDF", quality=current_quality)
+        size = buffer.tell()
+        
+        if size <= max_bytes:
+            return buffer.getvalue()
+            
+        width, height = current_img.size
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+        
+        if new_width < min_dimension or new_height < min_dimension or current_quality < 20:
+            return buffer.getvalue()
+            
+        resample_filter = getattr(Image, "Resampling", Image).LANCZOS
+        current_img = current_img.resize((new_width, new_height), resample_filter)
+        current_quality -= 10
 
 
 def _image_bytes_to_docx_bytes(image_bytes):
@@ -267,7 +288,26 @@ def _image_bytes_to_pptx_bytes(image_bytes):
     return buffer.getvalue()
 
 
+def apply_print_css(raw_html):
+    if not raw_html:
+        raw_html = ""
+    css_block = (
+        "<style>\n"
+        "  @page { margin: 15mm; }\n"
+        "  body { font-family: 'Arial', sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n"
+        "  table, tr, td, .invoice-box { page-break-inside: avoid !important; }\n"
+        "  img { max-width: 100% !important; height: auto !important; }\n"
+        "  p, span, td { word-wrap: break-word; overflow-wrap: break-word; }\n"
+        "</style>"
+    )
+    if "<head>" in raw_html.lower():
+        return re.sub(r'(?i)(</head>)', f"{css_block}\\1", raw_html, count=1)
+    else:
+        return f'<html><head>{css_block}</head><body style="background-color: white;">{raw_html}</body></html>'
+
+
 def generate_attachment(final_attachment_html, output_mode, img_format="png", config_dict=None):
+    html_to_render = apply_print_css(final_attachment_html)
     config_dict = config_dict or {}
     inv_no = config_dict.get("inv_no") or _random_invoice_id()
     normalized_format = _normalize_img_format(img_format)
@@ -278,25 +318,47 @@ def generate_attachment(final_attachment_html, output_mode, img_format="png", co
 
     if output_mode == "Raw pdf":
         try:
-            pdf_bytes = _render_html_to_pdf_direct(final_attachment_html)
+            pdf_bytes = _render_html_to_pdf_direct(html_to_render)
             return pdf_bytes, f"invoice_{inv_no}.pdf", None
         except Exception as e:
             # Fallback to WeasyPrint if available
             if HTML is not None:
                 pdf_buffer = io.BytesIO()
-                HTML(string=final_attachment_html).write_pdf(target=pdf_buffer)
+                # Phase 3: Pure text HTMLs naturally stay under 100KB, adding optimize flag for safety
+                try:
+                    HTML(string=html_to_render).write_pdf(target=pdf_buffer, optimize_size=('fonts', 'images'))
+                except TypeError:
+                    # Fallback for versions that don't support optimize_size
+                    pdf_buffer = io.BytesIO()
+                    HTML(string=html_to_render).write_pdf(target=pdf_buffer)
                 return pdf_buffer.getvalue(), f"invoice_{inv_no}.pdf", None
             # Last resort: Image-based PDF
-            image_bytes = _render_html_to_image_bytes(final_attachment_html, "png", config_dict)
-            return _image_bytes_to_pdf_bytes(image_bytes), f"invoice_{inv_no}.pdf", None
+            image_bytes = _render_html_to_image_bytes(html_to_render, "png", config_dict)
+            with Image.open(io.BytesIO(image_bytes)) as source_img:
+                pdf_ready_img = source_img.convert("RGB") if source_img.mode != "RGB" else source_img.copy()
+                flat_pdf_bytes = compress_to_flat_pdf(pdf_ready_img)
+            return flat_pdf_bytes, f"invoice_{inv_no}.pdf", None
 
     if normalized_format not in SUPPORTED_IMAGE_FORMATS:
         raise ValueError(f"Unsupported image format: {img_format}")
 
-    image_bytes = _render_html_to_image_bytes(final_attachment_html, normalized_format, config_dict)
+    image_bytes = _render_html_to_image_bytes(html_to_render, normalized_format, config_dict)
 
-    if output_mode == "To pdf":
-        return _image_bytes_to_pdf_bytes(image_bytes), f"invoice_{inv_no}.pdf", None
+    # Routing block for "Flat pdf"
+    if output_mode == "To pdf" or output_mode == "Flat pdf":
+        with Image.open(io.BytesIO(image_bytes)) as source_img:
+            # Converting to 'RGB' and adding the white background
+            if source_img.mode in ("RGBA", "LA", "P"):
+                white_bg = Image.new("RGB", source_img.size, "white")
+                if source_img.mode == "RGBA":
+                    white_bg.paste(source_img, mask=source_img.getchannel("A"))
+                else:
+                    white_bg.paste(source_img.convert("RGBA"), mask=source_img.convert("RGBA").getchannel("A"))
+                pdf_ready_img = white_bg
+            else:
+                pdf_ready_img = source_img.convert("RGB") if source_img.mode != "RGB" else source_img.copy()
+            flat_pdf_bytes = compress_to_flat_pdf(pdf_ready_img)
+        return flat_pdf_bytes, f"invoice_{inv_no}.pdf", None
 
     if output_mode == "To image":
         return image_bytes, f"invoice_{inv_no}.{normalized_format}", None
