@@ -1,0 +1,37 @@
+name: Build Windows EXE
+
+# Yeh line allow karegi ki aap manually button daba kar build run kar sako
+on:
+  workflow_dispatch: 
+
+jobs:
+  build-windows:
+    # Hum GitHub se ek free Windows computer maang rahe hain
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Aap apna version bhi daal sakte ho
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller html2image pillow weasyprint google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+      - name: Build EXE using your batch file
+        run: |
+          ./build_exe.bat
+        shell: cmd
+
+      - name: Upload EXE for Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rox-Invoice-App-Windows
+          # PyInstaller by default 'dist' folder mein exe daalta hai
+          path: dist/
