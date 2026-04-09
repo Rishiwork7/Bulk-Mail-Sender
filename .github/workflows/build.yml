@@ -26,9 +26,14 @@ jobs:
 
       - name: Build EXE using your batch file
         run: |
-          echo {} > config.json
+          # 1. Forcefully delete any existing spec or build files (Clean Slate)
+          del /f /q *.spec || rem
+          if exist build rmdir /s /q build
+          if exist dist rmdir /s /q dist'
+
+          # 2. Run the build script
           ./build_exe.bat
-        shell: cmd
+        shell: cm
 
       - name: Upload EXE for Download
         uses: actions/upload-artifact@v4
